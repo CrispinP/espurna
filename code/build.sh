@@ -9,17 +9,37 @@ is_git() {
     return 0
 }
 
+stat_bytes() {
+    case "$(uname -s)" in
+        Darwin) stat -f %z "$1";;
+        *) stat -c %s "$1";;
+    esac
+}
+
 # Script settings
 
 destination=../firmware
-version=$(grep APP_VERSION espurna/config/version.h | awk '{print $3}' | sed 's/"//g')
+version_file=espurna/config/version.h
+version=$(grep -E '^#define APP_VERSION' $version_file | awk '{print $3}' | sed 's/"//g')
+script_build_environments=true
+script_build_webui=true
 
-if is_git; then
+if ${TRAVIS:-false}; then
+    git_revision=${TRAVIS_COMMIT::7}
+    git_tag=${TRAVIS_TAG}
+elif is_git; then
     git_revision=$(git rev-parse --short HEAD)
-    git_version=${version}-${git_revision}
+    git_tag=$(git tag --contains HEAD)
 else
-    git_revision=
-    git_version=$version
+    git_revision=unknown
+    git_tag=
+fi
+
+if [[ -n $git_tag ]]; then
+    new_version=${version/-*}
+    sed -i -e "s@$version@$new_version@" $version_file
+    version=$new_version
+    trap "git checkout -- $version_file" EXIT
 fi
 
 par_build=false
@@ -42,9 +62,6 @@ list_envs() {
 
 travis=$(list_envs | grep travis | sort)
 available=$(list_envs | grep -Ev -- '-ota$|-ssl$|^travis' | sort)
-
-# Build tools settings
-export PLATFORMIO_BUILD_FLAGS="${PLATFORMIO_BUILD_FLAGS} -DAPP_REVISION='\"$git_revision\"'"
 
 # Functions
 print_available() {
@@ -94,26 +111,60 @@ build_webui() {
     echo "--------------------------------------------------------------"
     echo "Building web interface..."
     node node_modules/gulp/bin/gulp.js || exit
+
+    # TODO: do something if webui files are different
+    # for now, just print in travis log
+    if ${TRAVIS:-false}; then
+        git --no-pager diff --stat
+    fi
 }
 
 build_environments() {
     echo "--------------------------------------------------------------"
     echo "Building firmware images..."
-    mkdir -p ../firmware/espurna-$version
+    mkdir -p $destination/espurna-$version
 
     for environment in $environments; do
         echo -n "* espurna-$version-$environment.bin --- "
         platformio run --silent --environment $environment || exit 1
-        stat -c %s .pioenvs/$environment/firmware.bin
+        stat_bytes .pio/build/$environment/firmware.bin
         [[ "${TRAVIS_BUILD_STAGE_NAME}" = "Test" ]] || \
-            mv .pioenvs/$environment/firmware.bin $destination/espurna-$version/espurna-$version-$environment.bin
+            mv .pio/build/$environment/firmware.bin $destination/espurna-$version/espurna-$version-$environment.bin
     done
     echo "--------------------------------------------------------------"
 }
 
 # Parameters
-while getopts "lpd:" opt; do
+print_getopts_help() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTION] <ENVIRONMENT>...
+
+  Where ENVIRONMENT is environment name(s) from platformio.ini
+
+Options:
+
+  -f VALUE    Filter build stage by name to skip it
+              Supported VALUEs are "environments" and "webui"
+              Can be specified multiple times
+  -l          Print available environments
+  -d VALUE    Destination to move .bin files after building environments
+  -p          Enable parallel build
+              Depends on following exported variables:
+                BUILDER_THREAD=<number>        (default 0...4)
+                BUILDER_TOTAL_THREADS=<number> (default 4)
+              When building platformio environments, will only pick every <BUILDER_THREAD>th
+  -h          Display this message
+EOF
+}
+
+while getopts "f:lpd:h" opt; do
   case $opt in
+    f)
+        case "$OPTARG" in
+            webui) script_build_webui=false ;;
+            environments) script_build_environments=false ;;
+        esac
+        ;;
     l)
         print_available
         exit
@@ -124,6 +175,9 @@ while getopts "lpd:" opt; do
     d)
         destination=$OPTARG
         ;;
+    h)
+        print_getopts_help
+        exit
     esac
 done
 
@@ -132,18 +186,23 @@ shift $((OPTIND-1))
 # Welcome
 echo "--------------------------------------------------------------"
 echo "ESPURNA FIRMWARE BUILDER"
-echo "Building for version ${git_version}"
+echo "Building for version ${version}" ${git_revision:+($git_revision)}
 
 # Environments to build
 environments=$@
 
-if [ $# -eq 0 ]; then
-    set_default_environments
+if $script_build_webui ; then
+    build_webui
 fi
 
-if ${CI:-false}; then
-    print_environments
-fi
+if $script_build_environments ; then
+    if [ $# -eq 0 ]; then
+        set_default_environments
+    fi
 
-build_webui
-build_environments
+    if ${CI:-false}; then
+        print_environments
+    fi
+
+    build_environments
+fi

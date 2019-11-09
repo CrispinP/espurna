@@ -135,6 +135,21 @@
 #define BH1750_MODE                     BH1750_CONTINUOUS_HIGH_RES_MODE
 
 //------------------------------------------------------------------------------
+// BMP085/BMP180
+// Enable support by passing BMP180_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+
+#ifndef BMP180_SUPPORT
+#define BMP180_SUPPORT                  0
+#endif
+
+#ifndef BMP180_ADDRESS
+#define BMP180_ADDRESS                  0x00    // 0x00 means auto
+#endif
+
+#define BMP180_MODE                     3       // 0 for ultra-low power, 1 for standard, 2 for high resolution and 3 for ultrahigh resolution
+
+//------------------------------------------------------------------------------
 // BME280/BMP280
 // Enable support by passing BMX280_SUPPORT=1 build flag
 //------------------------------------------------------------------------------
@@ -143,18 +158,53 @@
 #define BMX280_SUPPORT                  0
 #endif
 
-#ifndef BMX280_ADDRESS
-#define BMX280_ADDRESS                  0x00    // 0x00 means auto
+#ifndef BMX280_NUMBER
+#define BMX280_NUMBER                   1       // Number of sensors present. Either 1 or 2 allowed
 #endif
+#ifndef BMX280_ADDRESS
+#define BMX280_ADDRESS                  0x00    // 0x00 means auto (0x76 or 0x77 allowed) for sensor #0
+#endif                                          // If (BMX280_NUMBER == 2) and
+                                                //   (BMX280_ADDRESS == 0x00) then sensor #1 is auto-discovered
+                                                //   (BMX280_ADDRESS != 0x00) then sensor #1 is the unnamed address
 
+#ifndef BMX280_MODE
 #define BMX280_MODE                     1       // 0 for sleep mode, 1 or 2 for forced mode, 3 for normal mode
+#endif
+#ifndef BMX280_STANDBY
 #define BMX280_STANDBY                  0       // 0 for 0.5ms, 1 for 62.5ms, 2 for 125ms
                                                 // 3 for 250ms, 4 for 500ms, 5 for 1000ms
                                                 // 6 for 10ms, 7 for 20ms
+#endif
+#ifndef BMX280_FILTER
 #define BMX280_FILTER                   0       // 0 for OFF, 1 for 2 values, 2 for 4 values, 3 for 8 values and 4 for 16 values
+#endif
+#ifndef BMX280_TEMPERATURE
 #define BMX280_TEMPERATURE              1       // Oversampling for temperature (set to 0 to disable magnitude)
+                                                // 0b000 = 0 = Skip measurement
+                                                // 0b001 = 1 = 1x 16bit/0.0050C resolution
+                                                // 0b010 = 2 = 2x 17bit/0.0025C
+                                                // 0b011 = 3 = 4x 18bit/0.0012C
+                                                // 0b100 = 4 = 8x 19bit/0.0006C
+                                                // 0b101 = 5 = 16x 20bit/0.0003C
+#endif
+#ifndef BMX280_HUMIDITY
 #define BMX280_HUMIDITY                 1       // Oversampling for humidity (set to 0 to disable magnitude, only for BME280)
+                                                // 0b000 = 0 = Skip measurement
+                                                // 0b001 = 1 = 1x 0.07% resolution
+                                                // 0b010 = 2 = 2x 0.05%
+                                                // 0b011 = 3 = 4x 0.04%
+                                                // 0b100 = 4 = 8x 0.03%
+                                                // 0b101 = 5 = 16x 0.02%
+#endif
+#ifndef BMX280_PRESSURE
 #define BMX280_PRESSURE                 1       // Oversampling for pressure (set to 0 to disable magnitude)
+                                                // 0b000 = 0 = Skipped
+                                                // 0b001 = 1 = 1x 16bit/2.62 Pa resolution
+                                                // 0b010 = 2 = 2x 17bit/1.31 Pa
+                                                // 0b011 = 3 = 4x 18bit/0.66 Pa
+                                                // 0b100 = 4 = 8x 19bit/0.33 Pa
+                                                // 0b101 = 5 = 16x 20bit/0.16 Pa
+#endif
 
 //------------------------------------------------------------------------------
 // Dallas OneWire temperature sensors
@@ -222,16 +272,100 @@
 #define DIGITAL_SUPPORT                 0
 #endif
 
-#ifndef DIGITAL_PIN
-#define DIGITAL_PIN                     2
+#ifndef DIGITAL1_PIN
+#define DIGITAL1_PIN                     2
 #endif
 
-#ifndef DIGITAL_PIN_MODE
-#define DIGITAL_PIN_MODE                INPUT_PULLUP
+#ifndef DIGITAL1_PIN_MODE
+#define DIGITAL1_PIN_MODE                INPUT_PULLUP
 #endif
 
-#ifndef DIGITAL_DEFAULT_STATE
-#define DIGITAL_DEFAULT_STATE           1
+#ifndef DIGITAL1_DEFAULT_STATE
+#define DIGITAL1_DEFAULT_STATE           1
+#endif
+
+#ifndef DIGITAL2_PIN
+#define DIGITAL2_PIN                     2
+#endif
+
+#ifndef DIGITAL2_PIN_MODE
+#define DIGITAL2_PIN_MODE                INPUT_PULLUP
+#endif
+
+#ifndef DIGITAL2_DEFAULT_STATE
+#define DIGITAL2_DEFAULT_STATE           1
+#endif
+
+#ifndef DIGITAL3_PIN
+#define DIGITAL3_PIN                     2
+#endif
+
+#ifndef DIGITAL3_PIN_MODE
+#define DIGITAL3_PIN_MODE                INPUT_PULLUP
+#endif
+
+#ifndef DIGITAL3_DEFAULT_STATE
+#define DIGITAL3_DEFAULT_STATE           1
+#endif
+
+#ifndef DIGITAL4_PIN
+#define DIGITAL4_PIN                     2
+#endif
+
+#ifndef DIGITAL4_PIN_MODE
+#define DIGITAL4_PIN_MODE                INPUT_PULLUP
+#endif
+
+#ifndef DIGITAL4_DEFAULT_STATE
+#define DIGITAL4_DEFAULT_STATE           1
+#endif
+
+#ifndef DIGITAL5_PIN
+#define DIGITAL5_PIN                     2
+#endif
+
+#ifndef DIGITAL5_PIN_MODE
+#define DIGITAL5_PIN_MODE                INPUT_PULLUP
+#endif
+
+#ifndef DIGITAL5_DEFAULT_STATE
+#define DIGITAL5_DEFAULT_STATE           1
+#endif
+
+#ifndef DIGITAL6_PIN
+#define DIGITAL6_PIN                     2
+#endif
+
+#ifndef DIGITAL6_PIN_MODE
+#define DIGITAL6_PIN_MODE                INPUT_PULLUP
+#endif
+
+#ifndef DIGITAL6_DEFAULT_STATE
+#define DIGITAL6_DEFAULT_STATE           1
+#endif
+
+#ifndef DIGITAL7_PIN
+#define DIGITAL7_PIN                     2
+#endif
+
+#ifndef DIGITAL7_PIN_MODE
+#define DIGITAL7_PIN_MODE                INPUT_PULLUP
+#endif
+
+#ifndef DIGITAL7_DEFAULT_STATE
+#define DIGITAL7_DEFAULT_STATE           1
+#endif
+
+#ifndef DIGITAL8_PIN
+#define DIGITAL8_PIN                     2
+#endif
+
+#ifndef DIGITAL8_PIN_MODE
+#define DIGITAL8_PIN_MODE                INPUT_PULLUP
+#endif
+
+#ifndef DIGITAL8_DEFAULT_STATE
+#define DIGITAL8_DEFAULT_STATE           1
 #endif
 
 //------------------------------------------------------------------------------
@@ -262,12 +396,28 @@
 #define EMON_MAX_SAMPLES                1000        // Max number of samples to get
 #define EMON_MAX_TIME                   250         // Max time in ms to sample
 #define EMON_FILTER_SPEED               512         // Mobile average filter speed
-#define EMON_MAINS_VOLTAGE              230         // Mains voltage
 #define EMON_REFERENCE_VOLTAGE          3.3         // Reference voltage of the ADC
-#define EMON_CURRENT_RATIO              30          // Current ratio in the clamp (30V/1A)
+
+#ifndef EMON_MAINS_VOLTAGE
+#define EMON_MAINS_VOLTAGE              230         // Mains voltage
+#endif
+
+#ifndef EMON_CURRENT_RATIO
+#define EMON_CURRENT_RATIO              30          // Current ratio in the clamp (30A/1V)
+#endif
+
+#ifndef EMON_REPORT_CURRENT
+
 #define EMON_REPORT_CURRENT             0           // Report current
+#endif
+
+#ifndef EMON_REPORT_POWER
 #define EMON_REPORT_POWER               1           // Report power
+#endif
+
+#ifndef EMON_REPORT_ENERGY
 #define EMON_REPORT_ENERGY              1           // Report energy
+#endif
 
 //------------------------------------------------------------------------------
 // Energy Monitor based on ADC121
@@ -312,24 +462,173 @@
 #define EVENTS_SUPPORT                  0       // Do not build with counter support by default
 #endif
 
-#ifndef EVENTS_TRIGGER
-#define EVENTS_TRIGGER                  1       // 1 to trigger callback on events,
+#ifndef EVENTS1_TRIGGER
+#define EVENTS1_TRIGGER                  1       // 1 to trigger callback on events,
                                                 // 0 to only count them and report periodically
 #endif
 
-#ifndef EVENTS_PIN
-#define EVENTS_PIN                      2       // GPIO to monitor
+#ifndef EVENTS1_PIN
+#define EVENTS1_PIN                      2       // GPIO to monitor
 #endif
 
-#ifndef EVENTS_PIN_MODE
-#define EVENTS_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
+#ifndef EVENTS1_PIN_MODE
+#define EVENTS1_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
 #endif
 
-#ifndef EVENTS_INTERRUPT_MODE
-#define EVENTS_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
+#ifndef EVENTS1_INTERRUPT_MODE
+#define EVENTS1_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
 #endif
 
-#define EVENTS_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#ifndef EVENTS1_DEBOUNCE
+#define EVENTS1_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#endif
+
+#ifndef EVENTS2_TRIGGER
+#define EVENTS2_TRIGGER                  1       // 1 to trigger callback on events,
+                                                // 0 to only count them and report periodically
+#endif
+
+#ifndef EVENTS2_PIN
+#define EVENTS2_PIN                      2       // GPIO to monitor
+#endif
+
+#ifndef EVENTS2_PIN_MODE
+#define EVENTS2_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
+#endif
+
+#ifndef EVENTS2_INTERRUPT_MODE
+#define EVENTS2_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
+#endif
+
+#ifndef EVENTS2_DEBOUNCE
+#define EVENTS2_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#endif
+
+#ifndef EVENTS3_TRIGGER
+#define EVENTS3_TRIGGER                  1       // 1 to trigger callback on events,
+                                                // 0 to only count them and report periodically
+#endif
+
+#ifndef EVENTS3_PIN
+#define EVENTS3_PIN                      2       // GPIO to monitor
+#endif
+
+#ifndef EVENTS3_PIN_MODE
+#define EVENTS3_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
+#endif
+
+#ifndef EVENTS3_INTERRUPT_MODE
+#define EVENTS3_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
+#endif
+
+#ifndef EVENTS3_DEBOUNCE
+#define EVENTS3_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#endif
+
+#ifndef EVENTS4_TRIGGER
+#define EVENTS4_TRIGGER                  1       // 1 to trigger callback on events,
+                                                // 0 to only count them and report periodically
+#endif
+
+#ifndef EVENTS4_PIN
+#define EVENTS4_PIN                      2       // GPIO to monitor
+#endif
+
+#ifndef EVENTS4_PIN_MODE
+#define EVENTS4_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
+#endif
+
+#ifndef EVENTS4_INTERRUPT_MODE
+#define EVENTS4_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
+#endif
+
+#ifndef EVENTS4_DEBOUNCE
+#define EVENTS4_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#endif
+
+#ifndef EVENTS5_TRIGGER
+#define EVENTS5_TRIGGER                  1       // 1 to trigger callback on events,
+                                                // 0 to only count them and report periodically
+#endif
+
+#ifndef EVENTS5_PIN
+#define EVENTS5_PIN                      2       // GPIO to monitor
+#endif
+
+#ifndef EVENTS5_PIN_MODE
+#define EVENTS5_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
+#endif
+
+#ifndef EVENTS5_INTERRUPT_MODE
+#define EVENTS5_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
+#endif
+
+#ifndef EVENTS5_DEBOUNCE
+#define EVENTS5_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#endif
+
+#ifndef EVENTS6_TRIGGER
+#define EVENTS6_TRIGGER                  1       // 1 to trigger callback on events,
+                                                // 0 to only count them and report periodically
+#endif
+
+#ifndef EVENTS6_PIN
+#define EVENTS6_PIN                      2       // GPIO to monitor
+#endif
+
+#ifndef EVENTS6_PIN_MODE
+#define EVENTS6_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
+#endif
+
+#ifndef EVENTS6_INTERRUPT_MODE
+#define EVENTS6_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
+#endif
+
+#ifndef EVENTS6_DEBOUNCE
+#define EVENTS6_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#endif
+
+#ifndef EVENTS7_TRIGGER
+#define EVENTS7_TRIGGER                  1       // 1 to trigger callback on events,
+                                                // 0 to only count them and report periodically
+#endif
+
+#ifndef EVENTS7_PIN
+#define EVENTS7_PIN                      2       // GPIO to monitor
+#endif
+
+#ifndef EVENTS7_PIN_MODE
+#define EVENTS7_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
+#endif
+
+#ifndef EVENTS7_INTERRUPT_MODE
+#define EVENTS7_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
+#endif
+
+#ifndef EVENTS7_DEBOUNCE
+#define EVENTS7_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#endif
+
+#ifndef EVENTS8_TRIGGER
+#define EVENTS8_TRIGGER                  1       // 1 to trigger callback on events,
+                                                // 0 to only count them and report periodically
+#endif
+
+#ifndef EVENTS8_PIN
+#define EVENTS8_PIN                      2       // GPIO to monitor
+#endif
+
+#ifndef EVENTS8_PIN_MODE
+#define EVENTS8_PIN_MODE                 INPUT   // INPUT, INPUT_PULLUP
+#endif
+
+#ifndef EVENTS8_INTERRUPT_MODE
+#define EVENTS8_INTERRUPT_MODE           RISING  // RISING, FALLING, CHANGE
+#endif
+
+#ifndef EVENTS8_DEBOUNCE
+#define EVENTS8_DEBOUNCE                 50      // Do not register events within less than 50 millis
+#endif
 
 //------------------------------------------------------------------------------
 // Geiger sensor
@@ -426,12 +725,58 @@
 #define HLW8012_USE_INTERRUPTS          1       // Use interrupts to trap HLW8012 signals
 #endif
 
+#ifndef HLW8012_WAIT_FOR_WIFI
+#define HLW8012_WAIT_FOR_WIFI           0       // Weather to enable interrupts only after
+                                                // wifi connection has been stablished
+#endif
+
 #ifndef HLW8012_INTERRUPT_ON
 #define HLW8012_INTERRUPT_ON            CHANGE  // When to trigger the interrupt
                                                 // Use CHANGE for HLW8012
                                                 // Use FALLING for BL0937 / HJL0
 #endif
 
+//------------------------------------------------------------------------------
+// LDR sensor
+// Enable support by passing LDR_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+ 
+#ifndef SENSOR_LUX_CORRECTION
+#define SENSOR_LUX_CORRECTION           0.0     // Offset correction
+#endif
+
+#ifndef LDR_SUPPORT
+#define LDR_SUPPORT                     0
+#endif
+ 
+#ifndef LDR_SAMPLES
+#define LDR_SAMPLES                     10      // Number of samples
+#endif
+ 
+#ifndef LDR_DELAY
+#define LDR_DELAY                       0       // Delay between samples in micros
+#endif
+ 
+#ifndef LDR_TYPE
+#define LDR_TYPE                        LDR_GL5528
+#endif
+ 
+#ifndef LDR_ON_GROUND
+#define LDR_ON_GROUND                   true
+#endif
+ 
+#ifndef LDR_RESISTOR
+#define LDR_RESISTOR                    10000   // Resistance
+#endif
+ 
+#ifndef LDR_MULTIPLICATION
+#define LDR_MULTIPLICATION              32017200
+#endif
+ 
+#ifndef LDR_POWER
+#define LDR_POWER                       1.5832
+#endif
+ 
 //------------------------------------------------------------------------------
 // MHZ19 CO2 sensor
 // Enable support by passing MHZ19_SUPPORT=1 build flag
@@ -526,6 +871,103 @@
 #endif
 
 //------------------------------------------------------------------------------
+// Particle Monitor based on Plantower PMS
+// Enable support by passing PMSX003_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+
+#ifndef PMSX003_SUPPORT
+#define PMSX003_SUPPORT                 0
+#endif
+
+#ifndef PMS_TYPE
+#define PMS_TYPE                        PMS_TYPE_X003
+#endif
+
+// You can enable smart sleep (read 6-times then sleep on 24-reading-cycles) to extend PMS sensor's life.
+// Otherwise the default lifetime of PMS sensor is about 8000-hours/1-years.
+// The PMS's fan will stop working on sleeping cycle, and will wake up on reading cycle.
+#ifndef PMS_SMART_SLEEP
+#define PMS_SMART_SLEEP                 0
+#endif
+
+#ifndef PMS_USE_SOFT
+#define PMS_USE_SOFT                    0       // If PMS_USE_SOFT == 1, DEBUG_SERIAL_SUPPORT must be 0
+#endif
+
+#ifndef PMS_RX_PIN
+#define PMS_RX_PIN                      13      // Software serial RX GPIO (if PMS_USE_SOFT == 1)
+#endif
+
+#ifndef PMS_TX_PIN
+#define PMS_TX_PIN                      15      // Software serial TX GPIO (if PMS_USE_SOFT == 1)
+#endif
+
+#ifndef PMS_HW_PORT
+#define PMS_HW_PORT                     Serial  // Hardware serial port (if PMS_USE_SOFT == 0)
+#endif
+
+//------------------------------------------------------------------------------
+// Pulse Meter Energy monitor
+// Enable support by passing PULSEMETER_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+
+#ifndef PULSEMETER_SUPPORT
+#define PULSEMETER_SUPPORT              0
+#endif
+#ifndef PULSEMETER_PIN
+#define PULSEMETER_PIN                  5
+#endif
+
+#ifndef PULSEMETER_ENERGY_RATIO
+#define PULSEMETER_ENERGY_RATIO         4000        // In pulses/kWh
+#endif
+
+#ifndef PULSEMETER_INTERRUPT_ON
+#define PULSEMETER_INTERRUPT_ON         FALLING
+#endif
+
+#ifndef PULSEMETER_DEBOUNCE
+#define PULSEMETER_DEBOUNCE             50         // Do not register pulses within less than 50 millis
+#endif
+
+//------------------------------------------------------------------------------
+// PZEM004T based power monitor
+// Enable support by passing PZEM004T_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+
+#ifndef PZEM004T_SUPPORT
+#define PZEM004T_SUPPORT                0
+#endif
+
+#ifndef PZEM004T_USE_SOFT
+#define PZEM004T_USE_SOFT               0       // Software serial is not working atm, use hardware serial
+#endif
+
+#ifndef PZEM004T_RX_PIN
+#define PZEM004T_RX_PIN                 13      // Software serial RX GPIO (if PZEM004T_USE_SOFT == 1)
+#endif
+
+#ifndef PZEM004T_TX_PIN
+#define PZEM004T_TX_PIN                 15      // Software serial TX GPIO (if PZEM004T_USE_SOFT == 1)
+#endif
+
+#ifndef PZEM004T_HW_PORT
+#define PZEM004T_HW_PORT                Serial  // Hardware serial port (if PZEM004T_USE_SOFT == 0)
+#endif
+
+#ifndef PZEM004T_ADDRESSES
+#define PZEM004T_ADDRESSES              "192.168.1.1"  // Device(s) address(es), separated by space, "192.168.1.1 192.168.1.2 192.168.1.3"
+#endif
+
+#ifndef PZEM004T_READ_INTERVAL
+#define PZEM004T_READ_INTERVAL          1500    // Read interval between same device
+#endif
+
+#ifndef PZEM004T_MAX_DEVICES
+#define PZEM004T_MAX_DEVICES            3
+#endif
+
+//------------------------------------------------------------------------------
 // SDS011 particulates sensor
 // Enable support by passing SDS011_SUPPORT=1 build flag
 //------------------------------------------------------------------------------
@@ -557,66 +999,6 @@
 
 #ifndef SENSEAIR_TX_PIN
 #define SENSEAIR_TX_PIN                 2
-#endif
-
-//------------------------------------------------------------------------------
-// Particle Monitor based on Plantower PMS
-// Enable support by passing PMSX003_SUPPORT=1 build flag
-//------------------------------------------------------------------------------
-
-#ifndef PMSX003_SUPPORT
-#define PMSX003_SUPPORT                 0
-#endif
-
-#ifndef PMS_TYPE
-#define PMS_TYPE                        PMS_TYPE_X003
-#endif
-
-// You can enable smart sleep (read 6-times then sleep on 24-reading-cycles) to extend PMS sensor's life.
-// Otherwise the default lifetime of PMS sensor is about 8000-hours/1-years.
-// The PMS's fan will stop working on sleeping cycle, and will wake up on reading cycle.
-#ifndef PMS_SMART_SLEEP
-#define PMS_SMART_SLEEP                 0
-#endif
-
-#ifndef PMS_USE_SOFT
-#define PMS_USE_SOFT               0       // If PMS_USE_SOFT == 1, DEBUG_SERIAL_SUPPORT must be 0
-#endif
-
-#ifndef PMS_RX_PIN
-#define PMS_RX_PIN                 13      // Software serial RX GPIO (if PMS_USE_SOFT == 1)
-#endif
-
-#ifndef PMS_TX_PIN
-#define PMS_TX_PIN                 15      // Software serial TX GPIO (if PMS_USE_SOFT == 1)
-#endif
-
-#ifndef PMS_HW_PORT
-#define PMS_HW_PORT                Serial  // Hardware serial port (if PMS_USE_SOFT == 0)
-#endif
-//------------------------------------------------------------------------------
-// PZEM004T based power monitor
-// Enable support by passing PZEM004T_SUPPORT=1 build flag
-//------------------------------------------------------------------------------
-
-#ifndef PZEM004T_SUPPORT
-#define PZEM004T_SUPPORT                0
-#endif
-
-#ifndef PZEM004T_USE_SOFT
-#define PZEM004T_USE_SOFT               0       // Software serial is not working atm, use hardware serial
-#endif
-
-#ifndef PZEM004T_RX_PIN
-#define PZEM004T_RX_PIN                 13      // Software serial RX GPIO (if PZEM004T_USE_SOFT == 1)
-#endif
-
-#ifndef PZEM004T_TX_PIN
-#define PZEM004T_TX_PIN                 15      // Software serial TX GPIO (if PZEM004T_USE_SOFT == 1)
-#endif
-
-#ifndef PZEM004T_HW_PORT
-#define PZEM004T_HW_PORT                Serial  // Hardware serial port (if PZEM004T_USE_SOFT == 0)
 #endif
 
 //------------------------------------------------------------------------------
@@ -671,6 +1053,23 @@
 #endif                                                               // error correction.
 
 //------------------------------------------------------------------------------
+// T6613 CO2 sensor
+// Enable support by passing T6613_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+
+#ifndef T6613_SUPPORT
+#define T6613_SUPPORT                   0
+#endif
+
+#ifndef T6613_RX_PIN
+#define T6613_RX_PIN                    4
+#endif
+
+#ifndef T6613_TX_PIN
+#define T6613_TX_PIN                    5
+#endif
+
+//------------------------------------------------------------------------------
 // TMP3X analog temperature sensor
 // Enable support by passing TMP3X_SUPPORT=1 build flag
 //------------------------------------------------------------------------------
@@ -709,6 +1108,93 @@
 #define V9261F_POWER_FACTOR             153699.0
 #define V9261F_RPOWER_FACTOR            V9261F_CURRENT_FACTOR
 
+//------------------------------------------------------------------------------
+// VEML6075 based power sensor
+// Enable support by passing VEML6075_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+
+#ifndef VEML6075_SUPPORT
+#define VEML6075_SUPPORT                  0
+#endif
+
+#ifndef VEML6075_INTEGRATION_TIME
+#define VEML6075_INTEGRATION_TIME         VEML6075::IT_100MS        // The time, in milliseconds, allocated for a single
+#endif                                                              // measurement. A longer timing budget allows for more
+                                                                    // accurate results at the cost of power.
+
+#ifndef VEML6075_DYNAMIC_MODE
+#define VEML6075_DYNAMIC_MODE             VEML6075::DYNAMIC_NORMAL  // The dynamic mode can either be normal or high. In high
+#endif                                                              // dynamic mode, the resolution increases by about two
+                                                                    // times.
+//------------------------------------------------------------------------------
+// VL53L1X
+// Enable support by passing VL53L1X_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+
+#ifndef VL53L1X_SUPPORT
+#define VL53L1X_SUPPORT                              0
+#endif
+
+#ifndef VL53L1X_I2C_ADDRESS
+#define VL53L1X_I2C_ADDRESS                          0x00          // 0x00 means auto
+#endif
+
+#ifndef VL53L1X_DISTANCE_MODE
+#define VL53L1X_DISTANCE_MODE                        VL53L1X::Long // The distance mode of the sensor. Can be one of
+#endif                                                             // `VL53L1X::Short`, `VL53L1X::Medium`, or `VL53L1X::Long.
+                                                                   // Shorter distance modes are less affected by ambient light
+                                                                   // but have lower maximum ranges, especially in the dark.
+
+
+#ifndef VL53L1X_MEASUREMENT_TIMING_BUDGET
+#define VL53L1X_MEASUREMENT_TIMING_BUDGET            140000        // The time, in microseconds, allocated for a single
+                                                                   // measurement. A longer timing budget allows for more
+                                                                   // accurate at the cost of power. The minimum budget is
+                                                                   // 20 ms (20000 us) in short distance mode and 33 ms for
+                                                                   // medium and long distance modes.
+#endif
+
+#ifndef VL53L1X_INTER_MEASUREMENT_PERIOD
+#define VL53L1X_INTER_MEASUREMENT_PERIOD             50            // Period, in milliseconds, determining how
+#endif                                                             // often the sensor takes a measurement.
+
+//------------------------------------------------------------------------------
+// MAX6675
+// Enable support by passing MAX6675_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+#ifndef MAX6675_CS_PIN
+#define MAX6675_CS_PIN                               13
+#endif
+
+#ifndef MAX6675_SO_PIN
+#define MAX6675_SO_PIN                               12
+#endif
+
+#ifndef MAX6675_SCK_PIN
+#define MAX6675_SCK_PIN                              14
+#endif
+
+//------------------------------------------------------------------------------
+// EZOPH pH meter
+// Enable support by passing EZOPH_SUPPORT=1 build flag
+//------------------------------------------------------------------------------
+
+#ifndef EZOPH_SUPPORT
+#define EZOPH_SUPPORT                0
+#endif
+
+#ifndef EZOPH_RX_PIN
+#define EZOPH_RX_PIN                 13      // Software serial RX GPIO
+#endif
+
+#ifndef EZOPH_TX_PIN
+#define EZOPH_TX_PIN                 15      // Software serial TX GPIO
+#endif
+
+#ifndef EZOPH_SYNC_INTERVAL
+#define EZOPH_SYNC_INTERVAL          1000    // Amount of time (in ms) sync new readings.
+#endif
+
 // =============================================================================
 // Sensor helpers configuration - can't move to dependencies.h
 // =============================================================================
@@ -718,6 +1204,7 @@
     AM2320_SUPPORT || \
     ANALOG_SUPPORT || \
     BH1750_SUPPORT || \
+    BMP180_SUPPORT || \
     BMX280_SUPPORT || \
     CSE7766_SUPPORT || \
     DALLAS_SUPPORT || \
@@ -728,9 +1215,12 @@
     EMON_ADS1X15_SUPPORT || \
     EMON_ANALOG_SUPPORT || \
     EVENTS_SUPPORT || \
+    EZOPH_SUPPORT || \
     GEIGER_SUPPORT || \
     GUVAS12SD_SUPPORT || \
     HLW8012_SUPPORT || \
+    LDR_SUPPORT || \
+    MAX6675_SUPPORT || \
     MICS2710_SUPPORT || \
     MICS5525_SUPPORT || \
     MHZ19_SUPPORT || \
@@ -739,11 +1229,16 @@
     SENSEAIR_SUPPORT || \
     PMSX003_SUPPORT || \
     PZEM004T_SUPPORT || \
+    PULSEMETER_SUPPORT || \
     SHT3X_I2C_SUPPORT || \
     SI7021_SUPPORT || \
     SONAR_SUPPORT || \
+    T6613_SUPPORT || \
     TMP3X_SUPPORT || \
-    V9261F_SUPPORT \
+    V9261F_SUPPORT || \
+    VEML6075_SUPPORT || \
+    VL53L1X_SUPPORT || \
+    ADE7953_SUPPORT \
 )
 #endif
 
@@ -779,6 +1274,19 @@
 #define I2C_CLEAR_BUS                   0       // Clear I2C bus on boot
 #define I2C_PERFORM_SCAN                1       // Perform a bus scan on boot
 
+// -----------------------------------------------------------------------------
+// ADE7953 Shelly Sensor
+// Enable support by passing ADE7953_SUPPORT=1 build flag
+// -----------------------------------------------------------------------------
+
+#ifndef ADE7953_SUPPORT
+#define ADE7953_SUPPORT                  0
+#endif
+
+#ifndef ADE7953_ADDRESS
+#define ADE7953_ADDRESS                  0x38
+#endif
+
 //--------------------------------------------------------------------------------
 // Class loading
 //--------------------------------------------------------------------------------
@@ -795,6 +1303,10 @@
 
 #if BH1750_SUPPORT
     #include "../sensors/BH1750Sensor.h"
+#endif
+
+#if BMP180_SUPPORT
+    #include "../sensors/BMP180Sensor.h"
 #endif
 
 #if BMX280_SUPPORT
@@ -837,6 +1349,10 @@
     #include "../sensors/EventSensor.h"
 #endif
 
+#if EZOPH_SUPPORT
+    #include "../sensors/EZOPHSensor.h"
+#endif
+
 #if GEIGER_SUPPORT
     #include "../sensors/GeigerSensor.h"
 #endif
@@ -849,9 +1365,13 @@
     #include "../sensors/HLW8012Sensor.h"
 #endif
 
-#if MHZ19_SUPPORT
-    #include "../sensors/MHZ19Sensor.h"
+#if LDR_SUPPORT
+    #include "../sensors/LDRSensor.h"
 #endif
+
+#if MAX6675_SUPPORT
+    #include "../sensors/MAX6675Sensor.h"
+#endif 
 
 #if MICS2710_SUPPORT
     #include "../sensors/MICS2710Sensor.h"
@@ -859,6 +1379,10 @@
 
 #if MICS5525_SUPPORT
     #include "../sensors/MICS5525Sensor.h"
+#endif
+
+#if MHZ19_SUPPORT
+    #include "../sensors/MHZ19Sensor.h"
 #endif
 
 #if NTC_SUPPORT
@@ -877,20 +1401,28 @@
     #include "../sensors/PMSX003Sensor.h"
 #endif
 
-#if PZEM004T_SUPPORT
-    #include "../sensors/PZEM004TSensor.h"
+#if PULSEMETER_SUPPORT
+    #include "../sensors/PulseMeterSensor.h"
 #endif
 
-#if SI7021_SUPPORT
-    #include "../sensors/SI7021Sensor.h"
+#if PZEM004T_SUPPORT
+    #include "../sensors/PZEM004TSensor.h"
 #endif
 
 #if SHT3X_I2C_SUPPORT
     #include "../sensors/SHT3XI2CSensor.h"
 #endif
 
+#if SI7021_SUPPORT
+    #include "../sensors/SI7021Sensor.h"
+#endif
+
 #if SONAR_SUPPORT
     #include "../sensors/SonarSensor.h"
+#endif
+
+#if T6613_SUPPORT
+    #include "../sensors/T6613Sensor.h"
 #endif
 
 #if TMP3X_SUPPORT
@@ -899,6 +1431,18 @@
 
 #if V9261F_SUPPORT
     #include "../sensors/V9261FSensor.h"
+#endif
+
+#if VEML6075_SUPPORT
+    #include "../sensors/VEML6075Sensor.h"
+#endif
+
+#if VL53L1X_SUPPORT
+    #include "../sensors/VL53L1XSensor.h"
+#endif
+
+#if ADE7953_SUPPORT
+    #include "../sensors/ADE7953Sensor.h"
 #endif
 
 #endif // SENSOR_SUPPORT

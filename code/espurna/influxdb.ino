@@ -2,26 +2,30 @@
 
 INFLUXDB MODULE
 
-Copyright (C) 2017-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2017-2019 by Xose Pérez <xose dot perez at gmail dot com>
 
 */
 
 #if INFLUXDB_SUPPORT
 
 #include "ESPAsyncTCP.h"
-#include "SyncClient.h"
+
+#include "libs/SyncClientWrap.h"
 
 bool _idb_enabled = false;
-SyncClient _idb_client;
+SyncClientWrap * _idb_client;
 
 // -----------------------------------------------------------------------------
 
-bool _idbWebSocketOnReceive(const char * key, JsonVariant& value) {
+bool _idbWebSocketOnKeyCheck(const char * key, JsonVariant& value) {
     return (strncmp(key, "idb", 3) == 0);
 }
 
-void _idbWebSocketOnSend(JsonObject& root) {
+void _idbWebSocketOnVisible(JsonObject& root) {
     root["idbVisible"] = 1;
+}
+
+void _idbWebSocketOnConnected(JsonObject& root) {
     root["idbEnabled"] = getSetting("idbEnabled", INFLUXDB_ENABLED).toInt() == 1;
     root["idbHost"] = getSetting("idbHost", INFLUXDB_HOST);
     root["idbPort"] = getSetting("idbPort", INFLUXDB_PORT).toInt();
@@ -37,6 +41,17 @@ void _idbConfigure() {
         setSetting("idbEnabled", 0);
     }
 }
+
+#if BROKER_SUPPORT
+void _idbBrokerCallback(const unsigned char type, const char * topic, unsigned char id, const char * payload) {
+    
+    // Only process status & senssor messages
+    if ((BROKER_MSG_TYPE_STATUS == type) || (BROKER_MSG_TYPE_SENSOR == type)) {
+        idbSend(topic, id, (char *) payload);
+    }
+
+}
+#endif // BROKER_SUPPORT
 
 // -----------------------------------------------------------------------------
 
@@ -55,8 +70,8 @@ bool idbSend(const char * topic, const char * payload) {
 
     bool success = false;
 
-    _idb_client.setTimeout(2);
-    if (_idb_client.connect((const char *) host, port)) {
+    _idb_client->setTimeout(2);
+    if (_idb_client->connect((const char *) host, (unsigned int) port)) {
 
         char data[128];
         snprintf(data, sizeof(data), "%s,device=%s value=%s", topic, getSetting("hostname").c_str(), String(payload).c_str());
@@ -68,17 +83,17 @@ bool idbSend(const char * topic, const char * payload) {
             getSetting("idbUsername", INFLUXDB_USERNAME).c_str(), getSetting("idbPassword", INFLUXDB_PASSWORD).c_str(),
             host, port, strlen(data), data);
 
-        if (_idb_client.printf(request) > 0) {
-            while (_idb_client.connected() && _idb_client.available() == 0) delay(1);
-            while (_idb_client.available()) _idb_client.read();
-            if (_idb_client.connected()) _idb_client.stop();
+        if (_idb_client->printf(request) > 0) {
+            while (_idb_client->connected() && _idb_client->available() == 0) delay(1);
+            while (_idb_client->available()) _idb_client->read();
+            if (_idb_client->connected()) _idb_client->stop();
             success = true;
         } else {
             DEBUG_MSG_P(PSTR("[INFLUXDB] Sent failed\n"));
         }
 
-        _idb_client.stop();
-        while (_idb_client.connected()) yield();
+        _idb_client->stop();
+        while (_idb_client->connected()) yield();
 
     } else {
         DEBUG_MSG_P(PSTR("[INFLUXDB] Connection failed\n"));
@@ -101,11 +116,19 @@ bool idbEnabled() {
 
 void idbSetup() {
 
+    _idb_client = new SyncClientWrap();
+
     _idbConfigure();
 
     #if WEB_SUPPORT
-        wsOnSendRegister(_idbWebSocketOnSend);
-        wsOnReceiveRegister(_idbWebSocketOnReceive);
+        wsRegister()
+            .onVisible(_idbWebSocketOnVisible)
+            .onConnected(_idbWebSocketOnConnected)
+            .onKeyCheck(_idbWebSocketOnKeyCheck);
+    #endif
+
+    #if BROKER_SUPPORT
+        brokerRegister(_idbBrokerCallback);
     #endif
 
     // Main callbacks

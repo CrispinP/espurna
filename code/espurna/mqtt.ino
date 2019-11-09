@@ -2,7 +2,8 @@
 
 MQTT MODULE
 
-Copyright (C) 2016-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2016-2019 by Xose Pérez <xose dot perez at gmail dot com>
+Updated secure client support by Niek van der Maas < mail at niekvandermaas dot nl>
 
 */
 
@@ -13,29 +14,51 @@ Copyright (C) 2016-2018 by Xose Pérez <xose dot perez at gmail dot com>
 #include <ESP8266mDNS.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include <utility>
 #include <Ticker.h>
+#include <TimeLib.h>
 
-#if MQTT_USE_ASYNC // Using AsyncMqttClient
+#include "libs/SecureClientHelpers.h"
 
-#include <AsyncMqttClient.h>
-AsyncMqttClient _mqtt;
+#if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
 
-#else // Using PubSubClient
+    AsyncMqttClient _mqtt;
 
-#include <PubSubClient.h>
-PubSubClient _mqtt;
-bool _mqtt_connected = false;
+#else // MQTT_LIBRARY_ARDUINOMQTT / MQTT_LIBRARY_PUBSUBCLIENT
 
-WiFiClient _mqtt_client;
-#if ASYNC_TCP_SSL_ENABLED
-WiFiClientSecure _mqtt_client_secure;
-#endif // ASYNC_TCP_SSL_ENABLED
+    WiFiClient _mqtt_client;
 
-#endif // MQTT_USE_ASYNC
+#if SECURE_CLIENT != SECURE_CLIENT_NONE
+    std::unique_ptr<SecureClient> _mqtt_client_secure = nullptr;
+
+    #if MQTT_SECURE_CLIENT_INCLUDE_CA
+    #include "static/mqtt_client_trusted_root_ca.h" // Assumes this header file defines a _mqtt_client_trusted_root_ca[] PROGMEM = "...PEM data..."
+    #else
+    #include "static/letsencrypt_isrgroot_pem.h" // Default to LetsEncrypt X3 certificate
+    #define _mqtt_client_trusted_root_ca _ssl_letsencrypt_isrg_x3_ca
+    #endif // MQTT_SECURE_CLIENT_INCLUDE_CA
+
+#endif // SECURE_CLIENT != SECURE_CLIENT_NONE
+
+#if MQTT_LIBRARY == MQTT_LIBRARY_ARDUINOMQTT
+#ifdef MQTT_MAX_PACKET_SIZE
+        MQTTClient _mqtt(MQTT_MAX_PACKET_SIZE);
+#else
+        MQTTClient _mqtt;
+#endif
+#elif MQTT_LIBRARY == MQTT_LIBRARY_PUBSUBCLIENT
+        PubSubClient _mqtt;
+#endif
+
+#endif // MQTT_LIBRARY == MQTT_ASYNCMQTTCLIENT
+
 
 bool _mqtt_enabled = MQTT_ENABLED;
 bool _mqtt_use_json = false;
 unsigned long _mqtt_reconnect_delay = MQTT_RECONNECT_DELAY_MIN;
+unsigned long _mqtt_last_connection = 0;
+bool _mqtt_connected = false;
+bool _mqtt_connecting = false;
 unsigned char _mqtt_qos = MQTT_QOS;
 bool _mqtt_retain = MQTT_RETAIN;
 unsigned long _mqtt_keepalive = MQTT_KEEPALIVE;
@@ -44,21 +67,24 @@ String _mqtt_topic_json;
 String _mqtt_setter;
 String _mqtt_getter;
 bool _mqtt_forward;
-char *_mqtt_user = 0;
-char *_mqtt_pass = 0;
-char *_mqtt_will;
-char *_mqtt_clientid;
-#if MQTT_SKIP_RETAINED
-unsigned long _mqtt_connected_at = 0;
-#endif
+String _mqtt_user;
+String _mqtt_pass;
+String _mqtt_will;
+String _mqtt_server;
+uint16_t _mqtt_port;
+String _mqtt_clientid;
+
+String _mqtt_payload_online;
+String _mqtt_payload_offline;
 
 std::vector<mqtt_callback_f> _mqtt_callbacks;
 
-typedef struct {
-    unsigned char parent = 255;
+struct mqtt_message_t {
+    static const unsigned char END = 255;
+    unsigned char parent = END;
     char * topic;
     char * message = NULL;
-} mqtt_message_t;
+};
 std::vector<mqtt_message_t> _mqtt_queue;
 Ticker _mqtt_flush_ticker;
 
@@ -66,18 +92,134 @@ Ticker _mqtt_flush_ticker;
 // Private
 // -----------------------------------------------------------------------------
 
+#if SECURE_CLIENT == SECURE_CLIENT_AXTLS
+SecureClientConfig _mqtt_sc_config {
+    "MQTT",
+    []() -> String {
+        return _mqtt_server;
+    },
+    []() -> int {
+        return getSetting("mqttScCheck", MQTT_SECURE_CLIENT_CHECK).toInt();
+    },
+    []() -> String {
+        return getSetting("mqttFP", MQTT_SSL_FINGERPRINT);
+    },
+    true
+};
+#endif
+
+#if SECURE_CLIENT == SECURE_CLIENT_BEARSSL
+SecureClientConfig _mqtt_sc_config {
+    "MQTT",
+    []() -> int {
+        return getSetting("mqttScCheck", MQTT_SECURE_CLIENT_CHECK).toInt();
+    },
+    []() -> PGM_P {
+        return _mqtt_client_trusted_root_ca;
+    },
+    []() -> String {
+        return getSetting("mqttFP", MQTT_SSL_FINGERPRINT);
+    },
+    []() -> uint16_t {
+        return getSetting("mqttScMFLN", MQTT_SECURE_CLIENT_MFLN).toInt();
+    },
+    true
+};
+#endif
+
+
+#if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
+
+void _mqttSetupAsyncClient(bool secure = false) {
+
+    _mqtt.setServer(_mqtt_server.c_str(), _mqtt_port);
+    _mqtt.setClientId(_mqtt_clientid.c_str());
+    _mqtt.setKeepAlive(_mqtt_keepalive);
+    _mqtt.setCleanSession(false);
+    _mqtt.setWill(_mqtt_will.c_str(), _mqtt_qos, _mqtt_retain, _mqtt_payload_offline.c_str());
+
+    if (_mqtt_user.length() && _mqtt_pass.length()) {
+        DEBUG_MSG_P(PSTR("[MQTT] Connecting as user %s\n"), _mqtt_user.c_str());
+        _mqtt.setCredentials(_mqtt_user.c_str(), _mqtt_pass.c_str());
+    }
+
+    #if SECURE_CLIENT != SECURE_CLIENT_NONE
+        if (secure) {
+            DEBUG_MSG_P(PSTR("[MQTT] Using SSL\n"));
+            _mqtt.setSecure(secure);
+        }
+    #endif // SECURE_CLIENT != SECURE_CLIENT_NONE
+
+    _mqtt.connect();
+
+}
+
+#endif // MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
+
+#if (MQTT_LIBRARY == MQTT_LIBRARY_ARDUINOMQTT) || (MQTT_LIBRARY == MQTT_LIBRARY_PUBSUBCLIENT)
+
+WiFiClient& _mqttGetClient(bool secure) {
+    #if SECURE_CLIENT != SECURE_CLIENT_NONE
+        return (secure ? _mqtt_client_secure->get() : _mqtt_client);
+    #else
+        return _mqtt_client;
+    #endif
+}
+
+bool _mqttSetupSyncClient(bool secure = false) {
+
+    #if SECURE_CLIENT != SECURE_CLIENT_NONE
+        if (secure) {
+            if (!_mqtt_client_secure) _mqtt_client_secure = std::make_unique<SecureClient>(_mqtt_sc_config);
+            return _mqtt_client_secure->beforeConnected();
+        }
+    #endif
+
+    return true;
+
+}
+
+bool _mqttConnectSyncClient(bool secure = false) {
+    bool result = false;
+
+    #if MQTT_LIBRARY == MQTT_LIBRARY_ARDUINOMQTT
+        _mqtt.begin(_mqtt_server.c_str(), _mqtt_port, _mqttGetClient(secure));
+        _mqtt.setWill(_mqtt_will.c_str(), _mqtt_payload_offline.c_str(), _mqtt_retain, _mqtt_qos);
+        result = _mqtt.connect(_mqtt_clientid.c_str(), _mqtt_user.c_str(), _mqtt_pass.c_str());
+    #elif MQTT_LIBRARY == MQTT_LIBRARY_PUBSUBCLIENT
+        _mqtt.setClient(_mqttGetClient(secure));
+        _mqtt.setServer(_mqtt_server.c_str(), _mqtt_port);
+
+        if (_mqtt_user.length() && _mqtt_pass.length()) {
+            DEBUG_MSG_P(PSTR("[MQTT] Connecting as user %s\n"), _mqtt_user.c_str());
+            result = _mqtt.connect(_mqtt_clientid.c_str(), _mqtt_user.c_str(), _mqtt_pass.c_str(), _mqtt_will.c_str(), _mqtt_qos, _mqtt_retain, _mqtt_payload_offline.c_str());
+        } else {
+            result = _mqtt.connect(_mqtt_clientid.c_str(), _mqtt_will.c_str(), _mqtt_qos, _mqtt_retain, _mqtt_payload_offline.c_str());
+        }
+    #endif
+
+    #if SECURE_CLIENT != SECURE_CLIENT_NONE
+        if (result && secure) {
+            result = _mqtt_client_secure->afterConnected();
+        }
+    #endif
+
+    return result;
+}
+
+#endif // (MQTT_LIBRARY == MQTT_LIBRARY_ARDUINOMQTT) || (MQTT_LIBRARY == MQTT_LIBRARY_PUBSUBCLIENT)
+
+
 void _mqttConnect() {
 
     // Do not connect if disabled
     if (!_mqtt_enabled) return;
 
-    // Do not connect if already connected
-    if (_mqtt.connected()) return;
+    // Do not connect if already connected or still trying to connect
+    if (_mqtt.connected() || _mqtt_connecting) return;
 
     // Check reconnect interval
-    static unsigned long last = 0;
-    if (millis() - last < _mqtt_reconnect_delay) return;
-    last = millis();
+    if (millis() - _mqtt_last_connection < _mqtt_reconnect_delay) return;
 
     // Increase the reconnect delay
     _mqtt_reconnect_delay += MQTT_RECONNECT_DELAY_STEP;
@@ -85,166 +227,155 @@ void _mqttConnect() {
         _mqtt_reconnect_delay = MQTT_RECONNECT_DELAY_MAX;
     }
 
-    String h = getSetting("mqttServer", MQTT_SERVER);
     #if MDNS_CLIENT_SUPPORT
-        h = mdnsResolve(h);
+        _mqtt_server = mdnsResolve(_mqtt_server);
     #endif
-    char * host = strdup(h.c_str());
 
-    unsigned int port = getSetting("mqttPort", MQTT_PORT).toInt();
+    DEBUG_MSG_P(PSTR("[MQTT] Connecting to broker at %s:%u\n"), _mqtt_server.c_str(), _mqtt_port);
 
-    if (_mqtt_user) free(_mqtt_user);
-    if (_mqtt_pass) free(_mqtt_pass);
-    if (_mqtt_will) free(_mqtt_will);
-    if (_mqtt_clientid) free(_mqtt_clientid);
+    DEBUG_MSG_P(PSTR("[MQTT] Client ID: %s\n"), _mqtt_clientid.c_str());
+    DEBUG_MSG_P(PSTR("[MQTT] QoS: %d\n"), _mqtt_qos);
+    DEBUG_MSG_P(PSTR("[MQTT] Retain flag: %d\n"), _mqtt_retain ? 1 : 0);
+    DEBUG_MSG_P(PSTR("[MQTT] Keepalive time: %ds\n"), _mqtt_keepalive);
+    DEBUG_MSG_P(PSTR("[MQTT] Will topic: %s\n"), _mqtt_will.c_str());
 
-    _mqtt_user = strdup(getSetting("mqttUser", MQTT_USER).c_str());
-    _mqtt_pass = strdup(getSetting("mqttPassword", MQTT_PASS).c_str());
-    _mqtt_will = strdup(mqttTopic(MQTT_TOPIC_STATUS, false).c_str());
-    _mqtt_clientid = strdup(getSetting("mqttClientID", getIdentifier()).c_str());
+    _mqtt_connecting = true;
 
-    DEBUG_MSG_P(PSTR("[MQTT] Connecting to broker at %s:%d\n"), host, port);
+    #if SECURE_CLIENT != SECURE_CLIENT_NONE
+        const bool secure = getSetting("mqttUseSSL", MQTT_SSL_ENABLED).toInt() == 1;
+    #else
+        const bool secure = false;
+    #endif
 
-    #if MQTT_USE_ASYNC
-
-        _mqtt.setServer(host, port);
-        _mqtt.setClientId(_mqtt_clientid);
-        _mqtt.setKeepAlive(_mqtt_keepalive);
-        _mqtt.setCleanSession(false);
-        _mqtt.setWill(_mqtt_will, _mqtt_qos, _mqtt_retain, "0");
-        if ((strlen(_mqtt_user) > 0) && (strlen(_mqtt_pass) > 0)) {
-            DEBUG_MSG_P(PSTR("[MQTT] Connecting as user %s\n"), _mqtt_user);
-            _mqtt.setCredentials(_mqtt_user, _mqtt_pass);
-        }
-
-        #if ASYNC_TCP_SSL_ENABLED
-
-            bool secure = getSetting("mqttUseSSL", MQTT_SSL_ENABLED).toInt() == 1;
-            _mqtt.setSecure(secure);
-            if (secure) {
-                DEBUG_MSG_P(PSTR("[MQTT] Using SSL\n"));
-                unsigned char fp[20] = {0};
-                if (sslFingerPrintArray(getSetting("mqttFP", MQTT_SSL_FINGERPRINT).c_str(), fp)) {
-                    _mqtt.addServerFingerprint(fp);
-                } else {
-                    DEBUG_MSG_P(PSTR("[MQTT] Wrong fingerprint\n"));
-                }
-            }
-
-        #endif // ASYNC_TCP_SSL_ENABLED
-
-        DEBUG_MSG_P(PSTR("[MQTT] Client ID: %s\n"), _mqtt_clientid);
-        DEBUG_MSG_P(PSTR("[MQTT] QoS: %d\n"), _mqtt_qos);
-        DEBUG_MSG_P(PSTR("[MQTT] Retain flag: %d\n"), _mqtt_retain ? 1 : 0);
-        DEBUG_MSG_P(PSTR("[MQTT] Keepalive time: %ds\n"), _mqtt_keepalive);
-        DEBUG_MSG_P(PSTR("[MQTT] Will topic: %s\n"), _mqtt_will);
-
-        _mqtt.connect();
-
-    #else // not MQTT_USE_ASYNC
-
-        bool response = true;
-
-        #if ASYNC_TCP_SSL_ENABLED
-
-            bool secure = getSetting("mqttUseSSL", MQTT_SSL_ENABLED).toInt() == 1;
-            if (secure) {
-                DEBUG_MSG_P(PSTR("[MQTT] Using SSL\n"));
-                if (_mqtt_client_secure.connect(host, port)) {
-                    char fp[60] = {0};
-                    if (sslFingerPrintChar(getSetting("mqttFP", MQTT_SSL_FINGERPRINT).c_str(), fp)) {
-                        if (_mqtt_client_secure.verify(fp, host)) {
-                            _mqtt.setClient(_mqtt_client_secure);
-                        } else {
-                            DEBUG_MSG_P(PSTR("[MQTT] Invalid fingerprint\n"));
-                            response = false;
-                        }
-                        _mqtt_client_secure.stop();
-                        yield();
-                    } else {
-                        DEBUG_MSG_P(PSTR("[MQTT] Wrong fingerprint\n"));
-                        response = false;
-                    }
-                } else {
-                    DEBUG_MSG_P(PSTR("[MQTT] Client connection failed\n"));
-                    response = false;
-                }
-
-            } else {
-                _mqtt.setClient(_mqtt_client);
-            }
-
-        #else // not ASYNC_TCP_SSL_ENABLED
-
-            _mqtt.setClient(_mqtt_client);
-
-        #endif // ASYNC_TCP_SSL_ENABLED
-
-        if (response) {
-
-            _mqtt.setServer(host, port);
-
-            if ((strlen(_mqtt_user) > 0) && (strlen(_mqtt_pass) > 0)) {
-                DEBUG_MSG_P(PSTR("[MQTT] Connecting as user %s\n"), _mqtt_user);
-                response = _mqtt.connect(_mqtt_clientid, _mqtt_user, _mqtt_pass, _mqtt_will, _mqtt_qos, _mqtt_retain, "0");
-            } else {
-				response = _mqtt.connect(_mqtt_clientid, _mqtt_will, _mqtt_qos, _mqtt_retain, "0");
-            }
-
-            DEBUG_MSG_P(PSTR("[MQTT] Client ID: %s\n"), _mqtt_clientid);
-            DEBUG_MSG_P(PSTR("[MQTT] QoS: %d\n"), _mqtt_qos);
-            DEBUG_MSG_P(PSTR("[MQTT] Retain flag: %d\n"), _mqtt_retain ? 1 : 0);
-            DEBUG_MSG_P(PSTR("[MQTT] Keepalive time: %ds\n"), _mqtt_keepalive);
-            DEBUG_MSG_P(PSTR("[MQTT] Will topic: %s\n"), _mqtt_will);
-
-        }
-
-        if (response) {
+    #if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
+        _mqttSetupAsyncClient(secure);
+    #elif (MQTT_LIBRARY == MQTT_LIBRARY_ARDUINOMQTT) || (MQTT_LIBRARY == MQTT_LIBRARY_PUBSUBCLIENT)
+        if (_mqttSetupSyncClient(secure) && _mqttConnectSyncClient(secure)) {
             _mqttOnConnect();
         } else {
             DEBUG_MSG_P(PSTR("[MQTT] Connection failed\n"));
+            _mqttOnDisconnect();
         }
+    #else
+        #error "please check that MQTT_LIBRARY is valid"
+    #endif
 
-    #endif // MQTT_USE_ASYNC
+}
 
-    free(host);
+void _mqttPlaceholders(String& text) {
 
+    text.replace("{hostname}", getSetting("hostname"));
+    text.replace("{magnitude}", "#");
+
+    String mac = WiFi.macAddress();
+    mac.replace(":", "");
+    text.replace("{mac}", mac);
+
+}
+
+template<typename T>
+void _mqttApplySetting(T& current, T& updated) {
+    if (current != updated) {
+        current = std::move(updated);
+        mqttDisconnect();
+    }
+}
+
+template<typename T>
+void _mqttApplySetting(T& current, const T& updated) {
+    if (current != updated) {
+        current = updated;
+        mqttDisconnect();
+    }
+}
+
+template<typename T>
+void _mqttApplyTopic(T& current, const char* magnitude) {
+    String updated = mqttTopic(magnitude, false);
+    if (current != updated) {
+        mqttFlush();
+        current = std::move(updated);
+    }
 }
 
 void _mqttConfigure() {
 
-    // Get base topic
-    _mqtt_topic = getSetting("mqttTopic", MQTT_TOPIC);
-    if (_mqtt_topic.endsWith("/")) _mqtt_topic.remove(_mqtt_topic.length()-1);
+    // Enable only when server is set
+    {
+        String server = getSetting("mqttServer", MQTT_SERVER);
+        uint16_t port = getSetting("mqttPort", MQTT_PORT).toInt();
+        bool enabled = false;
+        if (server.length()) {
+            enabled = getSetting("mqttEnabled", MQTT_ENABLED).toInt() == 1;
+        }
 
-    // Placeholders
-    _mqtt_topic.replace("{hostname}", getSetting("hostname"));
-    _mqtt_topic.replace("{magnitude}", "#");
-    if (_mqtt_topic.indexOf("#") == -1) _mqtt_topic = _mqtt_topic + "/#";
-    String mac = WiFi.macAddress();
-    mac.replace(":", "");
-    _mqtt_topic.replace("{mac}", mac);
+        _mqttApplySetting(_mqtt_server, server);
+        _mqttApplySetting(_mqtt_enabled, enabled);
+        _mqttApplySetting(_mqtt_port, port);
 
-    // Getters and setters
-    _mqtt_setter = getSetting("mqttSetter", MQTT_SETTER);
-    _mqtt_getter = getSetting("mqttGetter", MQTT_GETTER);
-    _mqtt_forward = !_mqtt_getter.equals(_mqtt_setter);
+        if (!enabled) return;
+    }
+
+    // Get base topic and apply placeholders
+    {
+        String topic = getSetting("mqttTopic", MQTT_TOPIC);
+        if (topic.endsWith("/")) topic.remove(topic.length()-1);
+
+        // Replace things inside curly braces (like {hostname}, {mac} etc.)
+        _mqttPlaceholders(topic);
+
+        if (topic.indexOf("#") == -1) topic.concat("/#");
+        _mqttApplySetting(_mqtt_topic, topic);
+
+        _mqttApplyTopic(_mqtt_will, MQTT_TOPIC_STATUS);
+    }
+
+    // Getter and setter
+    {
+        String setter = getSetting("mqttSetter", MQTT_SETTER);
+        String getter = getSetting("mqttGetter", MQTT_GETTER);
+        bool forward = !setter.equals(getter) && RELAY_REPORT_STATUS;
+
+        _mqttApplySetting(_mqtt_setter, setter);
+        _mqttApplySetting(_mqtt_getter, getter);
+        _mqttApplySetting(_mqtt_forward, forward);
+    }
 
     // MQTT options
-    _mqtt_qos = getSetting("mqttQoS", MQTT_QOS).toInt();
-    _mqtt_retain = getSetting("mqttRetain", MQTT_RETAIN).toInt() == 1;
-    _mqtt_keepalive = getSetting("mqttKeep", MQTT_KEEPALIVE).toInt();
-    if (getSetting("mqttClientID").length() == 0) delSetting("mqttClientID");
+    {
+        String user = getSetting("mqttUser", MQTT_USER);
+        _mqttPlaceholders(user);
 
-    // Enable
-    if (getSetting("mqttServer", MQTT_SERVER).length() == 0) {
-        mqttEnabled(false);
-    } else {
-        _mqtt_enabled = getSetting("mqttEnabled", MQTT_ENABLED).toInt() == 1;
+        String pass = getSetting("mqttPassword", MQTT_PASS);
+
+        unsigned char qos = getSetting("mqttQoS", MQTT_QOS).toInt();
+        bool retain = getSetting("mqttRetain", MQTT_RETAIN).toInt() == 1;
+        unsigned long keepalive = getSetting("mqttKeep", MQTT_KEEPALIVE).toInt();
+
+        String id = getSetting("mqttClientID", getIdentifier());
+        _mqttPlaceholders(id);
+
+        _mqttApplySetting(_mqtt_user, user);
+        _mqttApplySetting(_mqtt_pass, pass);
+        _mqttApplySetting(_mqtt_qos, qos);
+        _mqttApplySetting(_mqtt_retain, retain);
+        _mqttApplySetting(_mqtt_keepalive, keepalive);
+        _mqttApplySetting(_mqtt_clientid, id);
     }
-    _mqtt_use_json = (getSetting("mqttUseJson", MQTT_USE_JSON).toInt() == 1);
-    mqttQueueTopic(MQTT_TOPIC_JSON);
 
+    // MQTT JSON
+    {
+        _mqttApplySetting(_mqtt_use_json, getSetting("mqttUseJson", MQTT_USE_JSON).toInt() == 1);
+        _mqttApplyTopic(_mqtt_topic_json, MQTT_TOPIC_JSON);
+    }
+
+    // Custom payload strings
+    settingsProcessConfig({
+        {_mqtt_payload_online,  "mqttPayloadOnline",  MQTT_STATUS_ONLINE},
+        {_mqtt_payload_offline, "mqttPayloadOffline", MQTT_STATUS_OFFLINE}
+    });
+
+    // Reset reconnect delay to reconnect sooner
     _mqtt_reconnect_delay = MQTT_RECONNECT_DELAY_MIN;
 
 }
@@ -257,46 +388,41 @@ void _mqttBackwards() {
     }
 }
 
-unsigned long _mqttNextMessageId() {
-
-    static unsigned long id = 0;
-
-    // just reboot, get last count from EEPROM
-    if (id == 0) {
-
-        // read id from EEPROM and shift it
-        id = EEPROMr.read(EEPROM_MESSAGE_ID);
-        if (id == 0xFF) {
-
-            // There was nothing in EEPROM,
-            // next message is first message
-            id = 0;
-
-        } else {
-
-            id = (id << 8) + EEPROMr.read(EEPROM_MESSAGE_ID + 1);
-            id = (id << 8) + EEPROMr.read(EEPROM_MESSAGE_ID + 2);
-            id = (id << 8) + EEPROMr.read(EEPROM_MESSAGE_ID + 3);
-
-            // Calculate next block and start from there
-            id = MQTT_MESSAGE_ID_SHIFT * (1 + (id / MQTT_MESSAGE_ID_SHIFT));
-
-        }
-
-    }
-
-    // Save to EEPROM every MQTT_MESSAGE_ID_SHIFT
-    if (id % MQTT_MESSAGE_ID_SHIFT == 0) {
-        EEPROMr.write(EEPROM_MESSAGE_ID + 0, (id >> 24) & 0xFF);
-        EEPROMr.write(EEPROM_MESSAGE_ID + 1, (id >> 16) & 0xFF);
-        EEPROMr.write(EEPROM_MESSAGE_ID + 2, (id >>  8) & 0xFF);
-        EEPROMr.write(EEPROM_MESSAGE_ID + 3, (id >>  0) & 0xFF);
-        saveSettings();
-    }
-
-    id++;
-    return id;
-
+void _mqttInfo() {
+    DEBUG_MSG_P(PSTR(
+        "[MQTT] "
+        #if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
+            "AsyncMqttClient"
+        #elif MQTT_LIBRARY == MQTT_LIBRARY_ARDUINOMQTT
+            "Arduino-MQTT"
+        #elif MQTT_LIBRARY == MQTT_LIBRARY_PUBSUBCLIENT
+            "PubSubClient"
+        #endif
+        ", SSL "
+        #if SECURE_CLIENT != SEURE_CLIENT_NONE
+            "ENABLED"
+        #else
+            "DISABLED"
+        #endif
+        ", Autoconnect "
+        #if MQTT_AUTOCONNECT
+            "ENABLED"
+        #else
+            "DISABLED"
+        #endif
+        "\n"
+    ));
+    DEBUG_MSG_P(PSTR("[MQTT] Client %s, %s\n"),
+        _mqtt_enabled ? "ENABLED" : "DISABLED",
+        _mqtt.connected() ? "CONNECTED" : "DISCONNECTED"
+    );
+    DEBUG_MSG_P(PSTR("[MQTT] Retry %s (Now %u, Last %u, Delay %u, Step %u)\n"),
+        _mqtt_connecting ? "CONNECTING" : "WAITING",
+        millis(),
+        _mqtt_last_connection,
+        _mqtt_reconnect_delay,
+        MQTT_RECONNECT_DELAY_STEP
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -305,13 +431,22 @@ unsigned long _mqttNextMessageId() {
 
 #if WEB_SUPPORT
 
-bool _mqttWebSocketOnReceive(const char * key, JsonVariant& value) {
+bool _mqttWebSocketOnKeyCheck(const char * key, JsonVariant& value) {
     return (strncmp(key, "mqtt", 3) == 0);
 }
 
-void _mqttWebSocketOnSend(JsonObject& root) {
+void _mqttWebSocketOnVisible(JsonObject& root) {
     root["mqttVisible"] = 1;
+    #if ASYNC_TCP_SSL_ENABLED
+        root["mqttsslVisible"] = 1;
+    #endif
+}
+
+void _mqttWebSocketOnData(JsonObject& root) {
     root["mqttStatus"] = mqttConnected();
+}
+
+void _mqttWebSocketOnConnected(JsonObject& root) {
     root["mqttEnabled"] = mqttEnabled();
     root["mqttServer"] = getSetting("mqttServer", MQTT_SERVER);
     root["mqttPort"] = getSetting("mqttPort", MQTT_PORT);
@@ -321,8 +456,7 @@ void _mqttWebSocketOnSend(JsonObject& root) {
     root["mqttKeep"] = _mqtt_keepalive;
     root["mqttRetain"] = _mqtt_retain;
     root["mqttQoS"] = _mqtt_qos;
-    #if ASYNC_TCP_SSL_ENABLED
-        root["mqttsslVisible"] = 1;
+    #if SECURE_CLIENT != SECURE_CLIENT_NONE
         root["mqttUseSSL"] = getSetting("mqttUseSSL", MQTT_SSL_ENABLED).toInt() == 1;
         root["mqttFP"] = getSetting("mqttFP", MQTT_SSL_FINGERPRINT);
     #endif
@@ -340,10 +474,15 @@ void _mqttWebSocketOnSend(JsonObject& root) {
 
 void _mqttInitCommands() {
 
-    settingsRegisterCommand(F("MQTT.RESET"), [](Embedis* e) {
+    terminalRegisterCommand(F("MQTT.RESET"), [](Embedis* e) {
         _mqttConfigure();
         mqttDisconnect();
-        DEBUG_MSG_P(PSTR("+OK\n"));
+        terminalOK();
+    });
+
+    terminalRegisterCommand(F("MQTT.INFO"), [](Embedis* e) {
+        _mqttInfo();
+        terminalOK();
     });
 
 }
@@ -387,9 +526,9 @@ void _mqttOnConnect() {
     DEBUG_MSG_P(PSTR("[MQTT] Connected!\n"));
     _mqtt_reconnect_delay = MQTT_RECONNECT_DELAY_MIN;
 
-    #if MQTT_SKIP_RETAINED
-        _mqtt_connected_at = millis();
-    #endif
+    _mqtt_last_connection = millis();
+    _mqtt_connecting = false;
+    _mqtt_connected = true;
 
     // Clean subscriptions
     mqttUnsubscribeRaw("#");
@@ -402,6 +541,11 @@ void _mqttOnConnect() {
 }
 
 void _mqttOnDisconnect() {
+
+    // Reset reconnection delay
+    _mqtt_last_connection = millis();
+    _mqtt_connecting = false;
+    _mqtt_connected = false;
 
     DEBUG_MSG_P(PSTR("[MQTT] Disconnected!\n"));
 
@@ -420,7 +564,7 @@ void _mqttOnMessage(char* topic, char* payload, unsigned int len) {
     strlcpy(message, (char *) payload, len + 1);
 
     #if MQTT_SKIP_RETAINED
-        if (millis() - _mqtt_connected_at < MQTT_SKIP_TIME) {
+        if (millis() - _mqtt_last_connection < MQTT_SKIP_TIME) {
             DEBUG_MSG_P(PSTR("[MQTT] Received %s => %s - SKIPPED\n"), topic, message);
 			return;
 		}
@@ -496,22 +640,34 @@ String mqttTopic(const char * magnitude, unsigned int index, bool is_set) {
 
 // -----------------------------------------------------------------------------
 
-void mqttSendRaw(const char * topic, const char * message, bool retain) {
+bool mqttSendRaw(const char * topic, const char * message, bool retain) {
 
-    if (_mqtt.connected()) {
-        #if MQTT_USE_ASYNC
-            unsigned int packetId = _mqtt.publish(topic, _mqtt_qos, retain, message);
-            DEBUG_MSG_P(PSTR("[MQTT] Sending %s => %s (PID %d)\n"), topic, message, packetId);
-        #else
-            _mqtt.publish(topic, message, retain);
-            DEBUG_MSG_P(PSTR("[MQTT] Sending %s => %s\n"), topic, message);
+    if (!_mqtt.connected()) return false;
+
+    const unsigned int packetId(
+        #if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
+            _mqtt.publish(topic, _mqtt_qos, retain, message)
+        #elif MQTT_LIBRARY == MQTT_LIBRARY_ARDUINOMQTT
+            _mqtt.publish(topic, message, retain, _mqtt_qos)
+        #elif MQTT_LIBRARY == MQTT_LIBRARY_PUBSUBCLIENT
+            _mqtt.publish(topic, message, retain)
         #endif
+    );
+
+    const size_t message_len = strlen(message);
+    if (message_len > 128) {
+        DEBUG_MSG_P(PSTR("[MQTT] Sending %s => (%u bytes) (PID %u)\n"), topic, message_len, packetId);
+    } else {
+        DEBUG_MSG_P(PSTR("[MQTT] Sending %s => %s (PID %u)\n"), topic, message, packetId);
     }
+
+    return (packetId > 0);
+
 }
 
 
-void mqttSendRaw(const char * topic, const char * message) {
-    mqttSendRaw (topic, message, _mqtt_retain);
+bool mqttSendRaw(const char * topic, const char * message) {
+    return mqttSendRaw (topic, message, _mqtt_retain);
 }
 
 void mqttSend(const char * topic, const char * message, bool force, bool retain) {
@@ -520,9 +676,6 @@ void mqttSend(const char * topic, const char * message, bool force, bool retain)
 
     // Equeue message
     if (useJson) {
-
-        // Set default queue topic
-        mqttQueueTopic(MQTT_TOPIC_JSON);
 
         // Enqueue new message
         mqttEnqueue(topic, message);
@@ -598,9 +751,9 @@ void mqttFlush() {
     if (_mqtt_queue.size() == 0) return;
 
     // Build tree recursively
-    DynamicJsonBuffer jsonBuffer;
+    DynamicJsonBuffer jsonBuffer(1024);
     JsonObject& root = jsonBuffer.createObject();
-    _mqttBuildTree(root, 255);
+    _mqttBuildTree(root, mqtt_message_t::END);
 
     // Add extra propeties
     #if NTP_SUPPORT && MQTT_ENQUEUE_DATETIME
@@ -616,7 +769,7 @@ void mqttFlush() {
         root[MQTT_TOPIC_IP] = getIP();
     #endif
     #if MQTT_ENQUEUE_MESSAGE_ID
-        root[MQTT_TOPIC_MESSAGE_ID] = _mqttNextMessageId();
+        root[MQTT_TOPIC_MESSAGE_ID] = (Rtcmem->mqtt)++;
     #endif
 
     // Send
@@ -636,14 +789,6 @@ void mqttFlush() {
     }
     _mqtt_queue.clear();
 
-}
-
-void mqttQueueTopic(const char * topic) {
-    String t = mqttTopic(topic, false);
-    if (!t.equals(_mqtt_topic_json)) {
-        mqttFlush();
-        _mqtt_topic_json = t;
-    }
 }
 
 int8_t mqttEnqueue(const char * topic, const char * message, unsigned char parent) {
@@ -671,17 +816,17 @@ int8_t mqttEnqueue(const char * topic, const char * message, unsigned char paren
 }
 
 int8_t mqttEnqueue(const char * topic, const char * message) {
-    return mqttEnqueue(topic, message, 255);
+    return mqttEnqueue(topic, message, mqtt_message_t::END);
 }
 
 // -----------------------------------------------------------------------------
 
 void mqttSubscribeRaw(const char * topic) {
     if (_mqtt.connected() && (strlen(topic) > 0)) {
-        #if MQTT_USE_ASYNC
+        #if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
             unsigned int packetId = _mqtt.subscribe(topic, _mqtt_qos);
             DEBUG_MSG_P(PSTR("[MQTT] Subscribing to %s (PID %d)\n"), topic, packetId);
-        #else
+        #else // Arduino-MQTT or PubSubClient
             _mqtt.subscribe(topic, _mqtt_qos);
             DEBUG_MSG_P(PSTR("[MQTT] Subscribing to %s\n"), topic);
         #endif
@@ -694,10 +839,10 @@ void mqttSubscribe(const char * topic) {
 
 void mqttUnsubscribeRaw(const char * topic) {
     if (_mqtt.connected() && (strlen(topic) > 0)) {
-        #if MQTT_USE_ASYNC
+        #if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
             unsigned int packetId = _mqtt.unsubscribe(topic);
             DEBUG_MSG_P(PSTR("[MQTT] Unsubscribing to %s (PID %d)\n"), topic, packetId);
-        #else
+        #else // Arduino-MQTT or PubSubClient
             _mqtt.unsubscribe(topic);
             DEBUG_MSG_P(PSTR("[MQTT] Unsubscribing to %s\n"), topic);
         #endif
@@ -739,7 +884,11 @@ void mqttRegister(mqtt_callback_f callback) {
 
 void mqttSetBroker(IPAddress ip, unsigned int port) {
     setSetting("mqttServer", ip.toString());
+    _mqtt_server = ip.toString();
+
     setSetting("mqttPort", port);
+    _mqtt_port = port;
+
     mqttEnabled(MQTT_AUTOCONNECT);
 }
 
@@ -747,9 +896,20 @@ void mqttSetBrokerIfNone(IPAddress ip, unsigned int port) {
     if (getSetting("mqttServer", MQTT_SERVER).length() == 0) mqttSetBroker(ip, port);
 }
 
-void mqttReset() {
-    _mqttConfigure();
-    mqttDisconnect();
+const String& mqttPayloadOnline() {
+    return _mqtt_payload_online;
+}
+
+const String& mqttPayloadOffline() {
+    return _mqtt_payload_offline;
+}
+
+const char* mqttPayloadStatus(bool status) {
+    return status ? _mqtt_payload_online.c_str() : _mqtt_payload_offline.c_str();
+}
+
+void mqttSendStatus() {
+    mqttSend(MQTT_TOPIC_STATUS, _mqtt_payload_online.c_str(), true);
 }
 
 // -----------------------------------------------------------------------------
@@ -759,14 +919,22 @@ void mqttReset() {
 void mqttSetup() {
 
     _mqttBackwards();
+    _mqttInfo();
 
-    DEBUG_MSG_P(PSTR("[MQTT] Async %s, SSL %s, Autoconnect %s\n"),
-        MQTT_USE_ASYNC ? "ENABLED" : "DISABLED",
-        ASYNC_TCP_SSL_ENABLED ? "ENABLED" : "DISABLED",
-        MQTT_AUTOCONNECT ? "ENABLED" : "DISABLED"
-    );
+    #if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
 
-    #if MQTT_USE_ASYNC
+        // XXX: should not place this in config, addServerFingerprint does not check for duplicates
+        #if SECURE_CLIENT != SECURE_CLIENT_NONE
+        {
+            if (_mqtt_sc_config.on_fingerprint) {
+                const String fingerprint = _mqtt_sc_config.on_fingerprint();
+                uint8_t buffer[20] = {0};
+                if (sslFingerPrintArray(fingerprint.c_str(), buffer)) {
+                    _mqtt.addServerFingerprint(buffer);
+                }
+            }
+        }
+        #endif // SECURE_CLIENT != SECURE_CLIENT_NONE
 
         _mqtt.onConnect([](bool sessionPresent) {
             _mqttOnConnect();
@@ -787,7 +955,7 @@ void mqttSetup() {
             if (reason == AsyncMqttClientDisconnectReason::MQTT_NOT_AUTHORIZED) {
                 DEBUG_MSG_P(PSTR("[MQTT] Not authorized\n"));
             }
-            #if ASYNC_TCP_SSL_ENABLED
+            #if SECURE_CLIENT == SECURE_CLIENT_AXTLS
             if (reason == AsyncMqttClientDisconnectReason::TLS_BAD_FINGERPRINT) {
                 DEBUG_MSG_P(PSTR("[MQTT] Bad fingerprint\n"));
             }
@@ -804,20 +972,33 @@ void mqttSetup() {
             DEBUG_MSG_P(PSTR("[MQTT] Publish ACK for PID %d\n"), packetId);
         });
 
-    #else // not MQTT_USE_ASYNC
+    #elif MQTT_LIBRARY == MQTT_LIBRARY_ARDUINOMQTT
+
+        _mqtt.onMessageAdvanced([](MQTTClient *client, char topic[], char payload[], int length) {
+            _mqttOnMessage(topic, payload, length);
+        });
+
+    #elif MQTT_LIBRARY == MQTT_LIBRARY_PUBSUBCLIENT
 
         _mqtt.setCallback([](char* topic, byte* payload, unsigned int length) {
             _mqttOnMessage(topic, (char *) payload, length);
         });
 
-    #endif // MQTT_USE_ASYNC
+    #endif // MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
 
     _mqttConfigure();
     mqttRegister(_mqttCallback);
 
     #if WEB_SUPPORT
-        wsOnSendRegister(_mqttWebSocketOnSend);
-        wsOnReceiveRegister(_mqttWebSocketOnReceive);
+        wsRegister()
+            .onVisible(_mqttWebSocketOnVisible)
+            .onData(_mqttWebSocketOnData)
+            .onConnected(_mqttWebSocketOnConnected)
+            .onKeyCheck(_mqttWebSocketOnKeyCheck);
+
+        mqttRegister([](unsigned int type, const char*, const char*) {
+            if ((type == MQTT_CONNECT_EVENT) || (type == MQTT_DISCONNECT_EVENT)) wsPost(_mqttWebSocketOnData);
+        });
     #endif
 
     #if TERMINAL_SUPPORT
@@ -834,11 +1015,11 @@ void mqttLoop() {
 
     if (WiFi.status() != WL_CONNECTED) return;
 
-    #if MQTT_USE_ASYNC
+    #if MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
 
         _mqttConnect();
 
-    #else // not MQTT_USE_ASYNC
+    #else // MQTT_LIBRARY != MQTT_LIBRARY_ASYNCMQTTCLIENT
 
         if (_mqtt.connected()) {
 
@@ -848,15 +1029,20 @@ void mqttLoop() {
 
             if (_mqtt_connected) {
                 _mqttOnDisconnect();
-                _mqtt_connected = false;
             }
 
             _mqttConnect();
 
         }
 
-    #endif
+    #endif // MQTT_LIBRARY == MQTT_LIBRARY_ASYNCMQTTCLIENT
 
+}
+
+#else
+
+bool mqttForward() {
+    return false;
 }
 
 #endif // MQTT_SUPPORT
